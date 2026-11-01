@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A2 보드게임 AI — 2D 배열 + 로봇 착수 (강사용 슬라이드)</title>
+<style>
+  :root{
+    --brand:#1f4e79; --brand2:#2f6fab; --ink:#1a1a1a; --muted:#5a6470;
+    --bg:#0e1726; --paper:#ffffff; --line:#dfe5ec; --accent:#e8821a;
+    --engage:#8e44ad; --explore:#1f8a70; --explain:#1f4e79;
+    --elaborate:#b8860b; --evaluate:#c0392b;
+    --note-bg:#10243a; --note-ink:#dce8f5;
+    --mono:'Consolas','D2Coding','Courier New',monospace;
+    --sans:'Malgun Gothic','맑은 고딕',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans); color:var(--ink); background:var(--bg);
+    overflow:hidden;
+  }
+  #stage{position:fixed; inset:0; display:flex; align-items:center; justify-content:center}
+  .slide{
+    display:none; width:min(96vw,1180px); height:min(92vh,720px);
+    background:var(--paper); border-radius:16px; overflow:hidden;
+    box-shadow:0 24px 60px rgba(0,0,0,.45); position:relative;
+    flex-direction:column;
+  }
+  .slide.active{display:flex; animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .topbar{height:8px; width:100%}
+  .ph-engage{background:var(--engage)} .ph-explore{background:var(--explore)}
+  .ph-explain{background:var(--explain)} .ph-elaborate{background:var(--elaborate)}
+  .ph-evaluate{background:var(--evaluate)} .ph-title{background:var(--brand)}
+  .body{flex:1; padding:38px 54px; overflow:auto}
+  .phase-tag{
+    display:inline-block; font-weight:700; font-size:13px; letter-spacing:.08em;
+    color:#fff; padding:4px 12px; border-radius:20px; margin-bottom:14px;
+  }
+  .tag-engage{background:var(--engage)} .tag-explore{background:var(--explore)}
+  .tag-explain{background:var(--explain)} .tag-elaborate{background:var(--elaborate)}
+  .tag-evaluate{background:var(--evaluate)} .tag-title{background:var(--brand)}
+  h1{font-size:40px; color:var(--ink); line-height:1.2; margin-bottom:10px}
+  h2{font-size:30px; color:var(--brand); line-height:1.25; margin-bottom:16px}
+  h3{font-size:20px; color:var(--brand2); margin:18px 0 8px}
+  p,li{font-size:18px; line-height:1.6; color:#222}
+  ul,ol{margin:8px 0 8px 26px}
+  li{margin:6px 0}
+  .lead{font-size:21px; color:var(--muted); margin-bottom:8px}
+  .sub{font-size:17px; color:var(--muted)}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:22px}
+  .card{background:#f6f9fc; border:1px solid var(--line); border-radius:12px; padding:16px 18px}
+  .card h3{margin-top:0}
+  pre{
+    font-family:var(--mono); font-size:14.5px; line-height:1.5; background:#0f1b2d;
+    color:#e6edf6; padding:16px 18px; border-radius:10px; overflow:auto; margin:10px 0;
+  }
+  pre .c{color:#7fa6c9} pre .k{color:#e8821a} pre .s{color:#9ad29a}
+  code{font-family:var(--mono); background:#eef2f7; padding:2px 6px; border-radius:5px; font-size:.95em}
+  table{border-collapse:collapse; width:100%; margin:10px 0; font-size:15.5px}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top}
+  th{background:var(--brand); color:#fff; font-weight:700}
+  tr:nth-child(even) td{background:#f6f9fc}
+  .pill{display:inline-block;background:var(--accent);color:#fff;font-size:13px;font-weight:700;
+    padding:3px 10px;border-radius:14px;margin-left:8px}
+  .board{font-family:var(--mono); font-size:26px; line-height:1.35; background:#0f1b2d; color:#e6edf6;
+    display:inline-block; padding:14px 22px; border-radius:10px; white-space:pre}
+  .kbd{font-family:var(--mono); background:#222; color:#fff; border-radius:6px; padding:2px 8px; font-size:13px}
+  .footer{position:absolute; bottom:10px; right:18px; font-size:13px; color:var(--muted)}
+  .footer .ph{font-weight:700; color:var(--brand)}
+  .timer{position:absolute; bottom:10px; left:18px; font-size:13px; color:var(--muted)}
+  /* 발표자 노트 패널 */
+  #notes{
+    position:fixed; left:0; right:0; bottom:0; max-height:46vh; overflow:auto;
+    background:var(--note-bg); color:var(--note-ink); padding:18px 26px 22px;
+    border-top:3px solid var(--accent); transform:translateY(100%); transition:transform .2s ease;
+    z-index:50; font-size:15px; line-height:1.55;
+  }
+  #notes.show{transform:translateY(0)}
+  #notes h4{color:var(--accent); font-size:14px; letter-spacing:.06em; margin:12px 0 4px; text-transform:uppercase}
+  #notes h4:first-child{margin-top:0}
+  #notes p,#notes li{color:var(--note-ink); font-size:15px}
+  #notes ul{margin-left:22px}
+  #notes .qa b{color:#ffd9a8}
+  #hint{position:fixed; top:14px; right:16px; z-index:60; font-size:12px; color:#aebfd0;
+    background:rgba(0,0,0,.35); padding:6px 12px; border-radius:18px}
+  #progress{position:fixed; top:0; left:0; height:4px; background:var(--accent); z-index:70; transition:width .2s}
+  @media print{ body{overflow:visible} .slide{display:flex!important; page-break-after:always; box-shadow:none} #notes{position:static;transform:none;max-height:none} }
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+<div id="hint">← → 이동 · <span class="kbd">N</span> 노트 · <span class="kbd">F</span> 전체화면 · <span class="kbd">Home</span> 처음</div>
+<div id="stage"></div>
+<div id="notes"></div>
+
+<script>
+/* ============================================================
+   A2 보드게임 AI — 자립형 강사 슬라이드 (외부 의존 0)
+   각 슬라이드: {phase, html, note(HTML)}  ── note는 N키/하단패널 토글
+   ============================================================ */
+const PHASE = {
+  title:{cls:'title', tag:'tag-title', bar:'ph-title', label:'A2 · 하이브리드(Advanced)'},
+  engage:{cls:'engage', tag:'tag-engage', bar:'ph-engage', label:'1. ENGAGE · 흥미유발'},
+  explore:{cls:'explore', tag:'tag-explore', bar:'ph-explore', label:'2. EXPLORE · 탐구'},
+  explain:{cls:'explain', tag:'tag-explain', bar:'ph-explain', label:'3. EXPLAIN · 설명'},
+  elaborate:{cls:'elaborate', tag:'tag-elaborate', bar:'ph-elaborate', label:'4. ELABORATE · 심화'},
+  evaluate:{cls:'evaluate', tag:'tag-evaluate', bar:'ph-evaluate', label:'5. EVALUATE · 평가'},
+};
+
+const SL = [
+/* ---------- 표지 ---------- */
+{phase:'title', time:'',
+ html:`
+  <h1>보드게임 AI<br><span style="color:var(--brand)">2D 배열 알고리즘 + 로봇 착수</span></h1>
+  <p class="lead">틱택토 · minimax 완전탐색 · 비전 인식 → 판단 → 로봇 픽앤플레이스</p>
+  <div class="grid2" style="margin-top:22px">
+    <div class="card"><h3>차시 정보</h3>
+      <p>· 트랙: 하이브리드(Advanced)</p>
+      <p>· 시간: 110분 · 5E 수업모형</p>
+      <p>· 철학: Logic-First, Syntax-Later</p>
+      <p>· 산업연계(PBL): 비전→판단→집행 파이프라인</p></div>
+    <div class="card"><h3>오늘의 결과물</h3>
+      <p>· 2D 배열로 보드를 표현한다</p>
+      <p>· minimax로 최적 수를 계산한다</p>
+      <p>· 격자(행,열)→로봇 좌표(mm) 변환</p>
+      <p>· 로봇이 그 칸에 마커를 착수한다</p></div>
+  </div>`,
+ note:`
+  <h4>강사 대본</h4>
+  <p>"여러분 오늘은 컴퓨터가 절대 지지 않는 게임 AI를 직접 만들고, 그 AI가 생각한 수를 진짜 로봇 팔이 보드에 두게 만들 겁니다." 표지에서 오늘의 3축(2D 배열 · 탐색 알고리즘 · 로봇 좌표변환)을 손가락으로 짚으며 예고하세요.</p>
+  <h4>하드웨어 셋업 가이드 (수업 시작 전 10분)</h4>
+  <ul>
+    <li>두봇 전원 ON → USB 연결 → 장치관리자에서 COM 포트 확인(예: COM3).</li>
+    <li><b>전원 직후 반드시 home() 1회</b> 실행(좌표 신뢰성). 데모 코드가 자동 수행.</li>
+    <li>흡착컵·마커 더미(피더)를 작업영역 안쪽 한 곳(약 X200,Y-120)에 배치.</li>
+    <li>로봇이 없거나 불안하면: <code>set CURRICULUM_FORCE_MOCK=1</code> 로 mock 데모만으로도 전 과정 시연 가능.</li>
+  </ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 로봇 없이도 수업되나요? <b>A.</b> 됩니다. mock 모드가 인식→탐색→착수 로그를 콘솔로 모두 보여줍니다. 알고리즘(핵심)은 로봇 없이 완성·채점 가능합니다.</p>`},
+
+/* ---------- ENGAGE ---------- */
+{phase:'engage', time:'0~12분',
+ html:`
+  <span class="phase-tag tag-engage">ENGAGE · 흥미유발</span>
+  <h2>사람 vs 절대 안 지는 AI</h2>
+  <p class="lead">먼저 강사와 학생이 칠판 틱택토 한 판. 그다음 질문을 던집니다.</p>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card">
+      <h3>발문(생각 유도)</h3>
+      <ul>
+        <li>"컴퓨터는 어떻게 '안 지는 수'를 알까?"</li>
+        <li>"내가 둘 자리를 컴퓨터는 어떻게 숫자로 기억할까?"</li>
+        <li>"AI가 정한 칸을 로봇 팔은 어떻게 찾아갈까?"</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>산업 연결 (PBL)</h3>
+      <p>공장 자동화 라인 = <b>비전(인식) → 판단(알고리즘) → 집행(로봇)</b>. 오늘 만드는 틱택토 AI가 바로 이 파이프라인의 축소판입니다.</p>
+    </div>
+  </div>`,
+ note:`
+  <h4>운영 팁</h4>
+  <p>칠판/A4에 3x3 격자를 그리고 학생 한 명과 실제로 한 판 두세요. 강사가 일부러 져 주거나 비기며 "완벽한 플레이는 항상 무승부"라는 직관을 만들어 둡니다.</p>
+  <h4>발문 유도 멘트</h4>
+  <p>"여러분 머릿속에선 '저기 두면 다음에 내가 이기지'를 자동으로 계산하죠? 오늘은 그 '머릿속 계산'을 컴퓨터 코드로 옮기는 겁니다 — 이걸 minimax라고 부릅니다."</p>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 무조건 이기는 AI도 가능해요? <b>A.</b> 틱택토는 양쪽이 완벽하면 무승부가 한계입니다. AI는 '절대 지지 않고, 상대가 실수하면 이긴다'를 보장합니다.</p>`},
+
+/* ---------- EXPLORE ---------- */
+{phase:'explore', time:'12~35분',
+ html:`
+  <span class="phase-tag tag-explore">EXPLORE · 탐구 (Logic-First)</span>
+  <h2>코드 전에 손으로: 게임 트리 따라가기</h2>
+  <p class="lead">종이에 보드를 그리고 "이 칸에 두면?"을 끝까지 손으로 펼쳐 봅니다.</p>
+  <div class="grid2">
+    <div>
+      <h3>이 상황에서 O(AI)는 어디?</h3>
+      <div class="board">O | O |
+---------
+X | X |
+---------
+  |   |  </div>
+      <p class="sub" style="margin-top:8px">학생 활동: (행,열) 좌표로 후보를 적고, 각 수의 결과를 끝까지 따라가 점수를 매겨 보기.</p>
+    </div>
+    <div class="card">
+      <h3>탐구 규칙(점수 직관)</h3>
+      <ul>
+        <li>AI(O)가 이기면 <b>+</b>, 사람(X)이 이기면 <b>−</b>, 무승부 <b>0</b></li>
+        <li>AI 차례 → 점수를 <b>최대</b>로</li>
+        <li>사람 차례 → 점수를 <b>최소</b>로(최악을 가정)</li>
+        <li>"빨리 이기고 늦게 진다"를 깊이로 반영</li>
+      </ul>
+    </div>
+  </div>`,
+ note:`
+  <h4>강사 대본 (핵심 차시)</h4>
+  <p>여기서 코드를 절대 먼저 보여주지 마세요(Logic-First). 학생이 <b>직접 트리를 손으로 펼치게</b> 합니다. 위 보드의 정답은 <b>(0,2)</b> — O가 위쪽 가로줄을 완성해 즉시 승리. 학생들이 (0,2)를 찾아내면 "방금 너희가 한 게 minimax야!"라고 연결합니다.</p>
+  <h4>발문 유도</h4>
+  <ul>
+    <li>"내가 (0,2)에 안 두면 상대 X는 다음에 어디 둘까?" → 상대 최선을 가정(최소화)하는 감각.</li>
+    <li>두 번째 보드(블로킹)도 던지세요: X X _ 한 줄 → AI는 자기가 못 이겨도 <b>(0,2)를 막아야</b> 한다.</li>
+  </ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 경우의 수가 너무 많지 않나요? <b>A.</b> 틱택토는 최대 9!=362,880, 대칭/가지치기로 훨씬 적어 끝까지 탐색(완전탐색)이 가능합니다. 그래서 입문용 완전탐색 예제로 최적입니다.</p>`},
+
+/* ---------- EXPLAIN 1: 2D 배열 ---------- */
+{phase:'explain', time:'35~50분',
+ html:`
+  <span class="phase-tag tag-explain">EXPLAIN · 설명 ① 2D 배열</span>
+  <h2>보드 = 중첩 리스트 (2D 배열)</h2>
+  <div class="grid2">
+    <div>
+      <pre><span class="c"># 칸 상태 상수</span>
+EMPTY=<span class="s">" "</span>; P_AI=<span class="s">"O"</span>; P_HUMAN=<span class="s">"X"</span>
+
+board = [
+  [P_HUMAN, EMPTY, EMPTY],   <span class="c"># 0행</span>
+  [EMPTY,   P_AI,  EMPTY],   <span class="c"># 1행</span>
+  [EMPTY,   EMPTY, P_HUMAN], <span class="c"># 2행</span>
+]
+board[1][1]  <span class="c"># → 'O' (가운데)</span></pre>
+    </div>
+    <div class="card">
+      <h3>꼭 짚을 개념</h3>
+      <ul>
+        <li><code>board[행][열]</code> — 바깥=행, 안쪽=열</li>
+        <li>승리 라인 = 가로3 + 세로3 + 대각2 = <b>총 8개</b></li>
+        <li><code>available_moves</code>: EMPTY인 (r,c) 목록</li>
+        <li>백트래킹: 두고 → 재귀 → <b>되돌리기</b>(순수성)</li>
+      </ul>
+    </div>
+  </div>`,
+ note:`
+  <h4>강사 대본</h4>
+  <p>"보드를 리스트 안의 리스트로 표현합니다. 바깥 리스트의 인덱스가 '행', 안쪽이 '열'." 칠판 격자에 board[0][0]~board[2][2]를 직접 써 넣어 좌표 감각을 고정하세요.</p>
+  <h4>꼭 강조</h4>
+  <ul>
+    <li><code>winner()</code>는 8개 라인을 만들어 "세 칸이 EMPTY가 아니고 서로 같으면" 그 말이 승자.</li>
+    <li>scaffold의 TODO(1-a~c)가 정확히 이 부분 — 학생이 채울 핵심.</li>
+  </ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 왜 1차원 리스트 9칸이 아니라 2D인가요? <b>A.</b> 행/열/대각 검사와 로봇 좌표 매핑이 (행,열) 표현에서 훨씬 직관적입니다. 실제 산업 비전도 격자=2D 배열로 다룹니다.</p>`},
+
+/* ---------- EXPLAIN 2: minimax ---------- */
+{phase:'explain', time:'35~50분',
+ html:`
+  <span class="phase-tag tag-explain">EXPLAIN · 설명 ② minimax</span>
+  <h2>재귀로 끝까지 둬 보는 완전탐색</h2>
+  <pre><span class="k">def</span> _minimax(board, player, depth):
+    win = winner(board)
+    <span class="k">if</span> win==P_AI:    <span class="k">return</span> 10-depth, None  <span class="c"># 빨리 이길수록 ↑</span>
+    <span class="k">if</span> win==P_HUMAN: <span class="k">return</span> depth-10, None  <span class="c"># 늦게 질수록 덜 나쁨</span>
+    <span class="k">if</span> is_full(board): <span class="k">return</span> 0, None     <span class="c"># 무승부</span>
+    <span class="k">if</span> player==P_AI:              <span class="c"># 최대화</span>
+        best=-999
+        <span class="k">for</span> (r,c) <span class="k">in</span> available_moves(board):
+            board[r][c]=P_AI
+            s,_=_minimax(board, P_HUMAN, depth+1)
+            board[r][c]=EMPTY        <span class="c"># 되돌리기(백트래킹)</span>
+            <span class="k">if</span> s>best: best,best_move=s,(r,c)
+        <span class="k">return</span> best, best_move
+    <span class="c"># 사람 차례는 대칭: 최소화 (999, s&lt;best)</span></pre>`,
+ note:`
+  <h4>강사 대본 (천천히)</h4>
+  <p>세 가지만 잡으면 끝납니다: ① <b>단말 판정</b>(이김/짐/무승부면 점수 리턴) ② AI는 <b>최대</b>·사람은 <b>최소</b> ③ <b>두고→재귀→되돌리기</b>. EXPLORE에서 손으로 한 것과 1:1로 매칭해 보여주세요.</p>
+  <h4>왜 depth를 점수에 넣나</h4>
+  <p>10-depth/ depth-10: 같은 승리라도 "빨리 이기는 수"를, 같은 패배라도 "늦게 지는 수"를 고르게 만드는 교육용 직관. 빼도 무패는 유지되지만 사람이 보기에 덜 똑똑해 보입니다.</p>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 재귀가 어렵습니다. <b>A.</b> "함수가 자기를 부른다 = 상대 차례로 넘긴다"로 비유. 손 트리의 한 가지를 따라 콜스택을 칠판에 쌓아 보이면 즉시 이해합니다.</p>
+  <p class="qa"><b>Q.</b> board를 바꿨다 되돌리는 이유? <b>A.</b> 같은 board 객체를 재사용하므로, 가정해 본 수를 지워야 다음 후보가 깨끗한 상태에서 탐색됩니다(순수함수 유지).</p>`},
+
+/* ---------- EXPLAIN 3: 좌표변환 + 안전 ---------- */
+{phase:'explain', time:'35~50분',
+ html:`
+  <span class="phase-tag tag-explain">EXPLAIN · 설명 ③ 격자→로봇 좌표 + 안전</span>
+  <h2>(행,열) → 로봇 X,Y(mm)</h2>
+  <div class="grid2">
+    <div>
+      <pre>ws = config.WORKSPACE   <span class="c"># x:(180,320) y:(-150,150)</span>
+margin = 15%            <span class="c"># 가장자리 충돌 여백</span>
+fx=(row+0.5)/3; fy=(col+0.5)/3   <span class="c"># 셀 중앙</span>
+x = (x_lo+mx) + fx*((x_hi-x_lo)-2mx)
+y = (y_lo+my) + fy*((y_hi-y_lo)-2my)</pre>
+      <p class="sub">행↑ = 멀어짐(X↑), 열↑ = 오른쪽(Y↑)</p>
+    </div>
+    <div class="card">
+      <h3>안전 2중 가드 (SFR-002)</h3>
+      <ul>
+        <li>이동 전 <code>safety.check_move(x,y,z)</code> 사전 검사</li>
+        <li><code>bot.move_to</code> 내부 <code>clamp_move</code>가 재보정</li>
+        <li>Z: 이동 50 / 집기 −30 (하한 −60 안쪽)</li>
+        <li>흡착 ON(집기) → OFF(놓기) 픽앤플레이스 8단계</li>
+      </ul>
+    </div>
+  </div>`,
+ note:`
+  <h4>강사 대본</h4>
+  <p>"AI는 (0,2) 같은 '격자 좌표'로 답하지만, 로봇은 mm 단위 실제 좌표만 압니다. 둘을 잇는 게 cell_to_xy 변환." 작업영역 안쪽에 15% 여백을 두는 이유=가장자리/베이스 충돌 방지.</p>
+  <h4>안전 강조(필수)</h4>
+  <ul>
+    <li>모든 위험 이동 직전 check_move로 검사하고, 실제 이동은 clamp_move가 한 번 더 범위 안으로 보정하는 <b>이중 안전</b> 구조임을 분명히.</li>
+    <li>Z_PICK=−30은 작업영역 z 하한 −60 안쪽 → 책상에 박지 않음.</li>
+  </ul>
+  <h4>하드웨어 셋업</h4>
+  <p>실로봇 시연 전, 속도를 50% 이하로 낮추고 작업영역을 비우세요. 피더 좌표(FEEDER_XY=200,−120)에 마커 더미가 실제로 있는지 확인.</p>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 좌표가 범위를 벗어나면? <b>A.</b> check_move가 경고를 출력하고 clamp_move가 가장 가까운 안전값으로 잘라 줍니다 — 로봇이 위험 구역으로 가지 않습니다.</p>`},
+
+/* ---------- ELABORATE: 실습 ---------- */
+{phase:'elaborate', time:'50~90분',
+ html:`
+  <span class="phase-tag tag-elaborate">ELABORATE · 심화 실습 (40분)</span>
+  <h2>scaffold.py의 TODO를 완성하라</h2>
+  <div class="grid2">
+    <div class="card"><h3>실습 단계</h3>
+      <ol>
+        <li>TODO(1) winner — 8개 라인 검사</li>
+        <li>TODO(2~3) is_full / available_moves</li>
+        <li>TODO(4) _minimax — 최대/최소 + 되돌리기</li>
+        <li>TODO(5) best_move 호출</li>
+        <li>TODO(6) cell_to_xy 좌표변환</li>
+      </ol>
+    </div>
+    <div class="card"><h3>실행 & 검증</h3>
+      <pre><span class="c"># mock으로 끝까지 실행</span>
+set CURRICULUM_FORCE_MOCK=1
+python a2_board_game_ai/scaffold.py</pre>
+      <p>기대: AI가 <b>(0,2)</b> 승리/방어수를 두고 로봇이 그 칸에 마커 착수. <code>solution.py</code> 결과와 비교.</p>
+    </div>
+  </div>`,
+ note:`
+  <h4>운영 팁 (순회 지도)</h4>
+  <ul>
+    <li>먼저 mock으로 알고리즘만 완성시키고(채점 핵심), 잘 되면 실로봇으로 1회 시연하는 순서를 권장.</li>
+    <li>막히는 학생에겐 정답을 주지 말고 EXPLORE의 손 트리로 되돌아가게 하세요(소크라테스식).</li>
+  </ul>
+  <h4>자주 나오는 실습 오류 → 대응 (강사매뉴얼 표 참조)</h4>
+  <ul>
+    <li><b>best_move가 None</b> → TODO(5)에서 _minimax 결과의 '수'를 반환 안 함.</li>
+    <li><b>되돌리기 누락</b> → board[r][c]=EMPTY 빠뜨림 → 엉뚱한 수/오답.</li>
+    <li><b>winner 라인 8개 미만</b> → 대각선 2줄 누락이 가장 흔함.</li>
+    <li><b>IndexError</b> → board[열][행]로 뒤집어 접근.</li>
+  </ul>
+  <h4>하드웨어 트러블슈팅(요약)</h4>
+  <p>연결 안 됨→COM 포트/케이블 확인·재연결. 좌표 이상→home() 재실행. 충돌→속도↓·작업영역 비우기·E-stop. 자세한 표는 강사매뉴얼.docx 참조.</p>`},
+
+/* ---------- EVALUATE ---------- */
+{phase:'evaluate', time:'90~108분',
+ html:`
+  <span class="phase-tag tag-evaluate">EVALUATE · 평가 & 정리</span>
+  <h2>오늘 무엇을 할 수 있게 됐나</h2>
+  <table>
+    <tr><th>평가 항목</th><th>핵심 질문 / 확인 방법</th></tr>
+    <tr><td>2D 배열 이해</td><td>winner의 8개 라인을 설명하고 구현했는가</td></tr>
+    <tr><td>탐색 알고리즘</td><td>minimax 최대/최소·되돌리기를 구현했는가</td></tr>
+    <tr><td>좌표 변환</td><td>(행,열)→mm 변환이 작업영역 안인가</td></tr>
+    <tr><td>로봇 착수</td><td>AI 수 칸에 실제(또는 mock) 착수 성공</td></tr>
+    <tr><td>안전</td><td>이동 전 안전검사 흐름을 설명할 수 있는가</td></tr>
+  </table>
+  <p style="margin-top:12px"><span class="pill">정리 발문</span> "minimax를 4x4나 오목에 그대로 쓸 수 있을까? 왜 안 될까?" → 다음 차시(가지치기/휴리스틱) 예고.</p>`,
+ note:`
+  <h4>마무리 대본</h4>
+  <p>학생 2~3명에게 "AI가 왜 그 칸을 골랐는지"를 자기 말로 설명하게 하세요(이해 확인). 비전→판단→집행 파이프라인을 다시 한 줄로 요약시키며 산업 연계를 닫습니다.</p>
+  <h4>채점(루브릭은 강사매뉴얼.docx 상세)</h4>
+  <ul>
+    <li>알고리즘 정확성(40%): 승리수·방어수를 정확히 두는가.</li>
+    <li>실행/검증(20%): mock 완주 + solution 대조.</li>
+    <li>로봇 착수(20%): 좌표변환·안전·픽앤플레이스.</li>
+    <li>이해/설명(20%): minimax·좌표변환을 설명.</li>
+  </ul>
+  <h4>차시 종료 체크</h4>
+  <ul><li>로봇 안전정지·홈·연결해제(with 블록이 자동 처리) 확인 후 전원 OFF.</li></ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa"><b>Q.</b> 더 어려운 게임도 이렇게? <b>A.</b> 원리는 같지만 경우의 수가 폭발해 알파-베타 가지치기/평가함수가 필요 — 다음 차시 떡밥으로.</p>`},
+];
+
+/* ---------- 렌더링/네비게이션 ---------- */
+const stage=document.getElementById('stage');
+const notesEl=document.getElementById('notes');
+const prog=document.getElementById('progress');
+let idx=0, notesOn=false;
+
+SL.forEach((s,i)=>{
+  const p=PHASE[s.phase];
+  const d=document.createElement('div');
+  d.className='slide';
+  d.innerHTML=`<div class="topbar ${p.bar}"></div>
+    <div class="body">${s.html}</div>
+    <div class="timer">${s.time?('⏱ '+s.time):''}</div>
+    <div class="footer"><span class="ph">${p.label}</span> · <span id="num${i}"></span></div>`;
+  stage.appendChild(d);
+});
+const slides=[...document.querySelectorAll('.slide')];
+
+function render(){
+  slides.forEach((s,i)=>s.classList.toggle('active',i===idx));
+  document.getElementById('num'+idx).textContent=`슬라이드 ${idx+1} / ${SL.length}`;
+  notesEl.innerHTML=SL[idx].note||'<p>(노트 없음)</p>';
+  prog.style.width=((idx+1)/SL.length*100)+'%';
+  document.title=`A2 (${idx+1}/${SL.length}) 보드게임 AI`;
+}
+function go(n){ idx=Math.max(0,Math.min(SL.length-1,n)); render(); }
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){go(idx+1);e.preventDefault();}
+  else if(e.key==='ArrowLeft'||e.key==='PageUp'){go(idx-1);e.preventDefault();}
+  else if(e.key==='Home'){go(0);}
+  else if(e.key==='End'){go(SL.length-1);}
+  else if(e.key==='n'||e.key==='N'){notesOn=!notesOn; notesEl.classList.toggle('show',notesOn);}
+  else if(e.key==='f'||e.key==='F'){ if(!document.fullscreenElement)document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
+});
+/* 클릭(좌/우 절반)으로도 이동 — 발표 편의 */
+stage.addEventListener('click',e=>{ go(idx + (e.clientX < window.innerWidth/2 ? -1 : 1)); });
+
+render();
+</script>
+</body>
+</html>

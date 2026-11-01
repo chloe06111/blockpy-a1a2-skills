@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A1 · LLM 오케스트레이터 — 음성 명령 다단계 분해·실행</title>
+<style>
+  :root{
+    --brand:#1F4E79; --brand2:#2f6fb0; --ink:#1a1a1a; --muted:#5b6b7b;
+    --bg:#f4f7fb; --card:#ffffff; --accent:#e8731a; --ok:#1c7c54; --warn:#b5481b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:"맑은 고딕","Malgun Gothic",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); overflow:hidden;
+  }
+  #stage{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;}
+  .slide{
+    display:none; width:min(96vw,1180px); height:min(92vh,720px);
+    background:var(--card); border-radius:18px; padding:54px 64px;
+    box-shadow:0 18px 50px rgba(20,40,70,.16); position:relative;
+    flex-direction:column; overflow:auto;
+  }
+  .slide.active{display:flex; animation:fade .35s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .tag{
+    display:inline-block; font-size:13px; font-weight:700; letter-spacing:.5px;
+    color:#fff; background:var(--brand); padding:5px 13px; border-radius:30px; margin-bottom:18px;
+  }
+  .tag.engage{background:#7a3fb0;} .tag.explore{background:#1c7c54;}
+  .tag.explain{background:var(--brand);} .tag.elaborate{background:var(--accent);}
+  .tag.evaluate{background:#b5481b;}
+  h1{font-size:42px; line-height:1.18; color:var(--brand); margin-bottom:18px;}
+  h2{font-size:30px; line-height:1.25; color:var(--brand); margin-bottom:20px;}
+  h3{font-size:21px; color:var(--ink); margin:18px 0 10px;}
+  p,li{font-size:19px; line-height:1.65; color:var(--ink);}
+  ul,ol{margin:6px 0 6px 26px;} li{margin:7px 0;}
+  .sub{font-size:20px; color:var(--muted); margin-top:8px;}
+  .cols{display:flex; gap:28px; flex-wrap:wrap;}
+  .col{flex:1 1 0; min-width:240px;}
+  .card{background:#f7faff; border:1px solid #dde7f3; border-radius:12px; padding:16px 18px; margin:10px 0;}
+  .pill{display:inline-block; background:#eef3fa; border:1px solid #d4e0ef; color:var(--brand);
+        border-radius:8px; padding:4px 10px; font-size:15px; margin:3px 4px 3px 0;}
+  code,.mono{font-family:Consolas,"D2Coding",monospace;}
+  pre{background:#0f2233; color:#e6f0fa; border-radius:12px; padding:18px 20px; font-size:16px;
+      line-height:1.55; overflow:auto; margin:12px 0;}
+  pre .c{color:#7fa8c9;} pre .k{color:#ffb66b;} pre .s{color:#9ee6b8;}
+  .flow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:14px 0;}
+  .flow .node{background:var(--brand); color:#fff; border-radius:12px; padding:12px 16px;
+       font-weight:700; font-size:17px;}
+  .flow .arr{color:var(--brand2); font-size:24px; font-weight:700;}
+  .flow .gate{background:var(--warn);}
+  .safe{background:#fff5ee; border-left:5px solid var(--accent); padding:12px 16px; border-radius:8px; margin:10px 0;}
+  .big{font-size:23px;}
+  table{border-collapse:collapse; width:100%; margin:10px 0; font-size:16px;}
+  th,td{border:1px solid #d4e0ef; padding:8px 11px; text-align:left; vertical-align:top;}
+  th{background:var(--brand); color:#fff;}
+  /* HUD */
+  #hud{position:fixed; left:0; right:0; bottom:0; display:flex; justify-content:space-between;
+       align-items:center; padding:10px 22px; font-size:14px; color:var(--muted); pointer-events:none;}
+  #hud .seg{background:rgba(255,255,255,.85); border-radius:20px; padding:6px 14px; pointer-events:auto;}
+  #bar{position:fixed; top:0; left:0; height:5px; background:var(--accent); width:0; transition:width .3s;}
+  /* Presenter notes */
+  #notes{
+    position:fixed; left:0; right:0; bottom:0; max-height:46vh; overflow:auto;
+    background:#10202f; color:#e9f1f9; padding:20px 30px 56px; display:none;
+    box-shadow:0 -10px 30px rgba(0,0,0,.3); font-size:16px; line-height:1.6;
+  }
+  #notes.show{display:block;}
+  #notes h4{color:#ffc07a; font-size:15px; letter-spacing:1px; margin:14px 0 6px; text-transform:uppercase;}
+  #notes h4:first-child{margin-top:0;}
+  #notes p,#notes li{color:#dce7f1; font-size:16px;}
+  #notes ul{margin-left:22px;}
+  #notes .qa{color:#a9e0c4;}
+  .hint{font-size:14px; color:var(--muted); position:absolute; top:18px; right:24px;}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div id="stage"></div>
+
+<div id="hud">
+  <div class="seg" id="title-hud">A1 · LLM 오케스트레이터</div>
+  <div class="seg"><span id="pageno">1</span> / <span id="pagetot">0</span> &nbsp;·&nbsp; ← → 이동 &nbsp;·&nbsp; <b>N</b> 발표자 노트</div>
+</div>
+
+<div id="notes"></div>
+
+<script>
+/* =========================================================================
+   슬라이드 데이터 — 각 슬라이드는 {html, notes}. notes는 발표자 노트(N 토글).
+   외부 의존 0 · 한 파일 완결 · 좌우 화살표 네비 · 슬라이드 번호 · 진행바.
+   ========================================================================= */
+const SLIDES = [
+/* 0 — 표지 */
+{html:`
+  <span class="tag">하이브리드(Advanced) · 110분 · 5E · 산업연계 PBL</span>
+  <h1>LLM 오케스트레이터<br>음성 명령 다단계 분해·실행</h1>
+  <p class="sub">한 마디 음성 명령을 → 작은 단계로 분해(plan) → 사람 검토(안전 게이트) → 로봇이 차례로 실행</p>
+  <div class="flow" style="margin-top:30px">
+    <span class="node">🎤 음성(STT)</span><span class="arr">→</span>
+    <span class="node">🧠 LLM 분해</span><span class="arr">→</span>
+    <span class="node gate">🛡 사람 검토</span><span class="arr">→</span>
+    <span class="node">🤖 순차 실행</span>
+  </div>
+  <p class="sub" style="margin-top:26px">국립부산과학관 · 두봇(Dobot) 코딩 교육 · A1차시 강사용 슬라이드</p>
+`,
+notes:`
+  <h4>하드웨어 셋업 가이드 (수업 시작 전)</h4>
+  <ul>
+    <li>mock 우선: <code>CURRICULUM_FORCE_MOCK=1 python a1_voice_orchestration/solution.py</code> 가 끝까지 도는지 확인.</li>
+    <li>실하드웨어 반: Dobot 전원·USB 연결 → DobotStudio 종료(포트 점유 방지) → COM 번호 확인.</li>
+    <li>전원 직후 <code>bot.home()</code> 으로 원점 복귀가 되는지 먼저 점검. 책상 위 색 정리함 위치를 DROP_ZONES와 맞춤.</li>
+  </ul>
+  <h4>강사 대본</h4>
+  <p>"오늘은 여러분이 로봇에게 코드 한 줄씩 명령하는 게 아니라, <b>말 한마디</b>로 시키면 로봇이 스스로 단계를 짜서 일하게 만들 겁니다. 그 ‘지휘자’가 바로 LLM 오케스트레이터예요."</p>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. 로봇·API 키 없어도 되나요? → 됩니다. STT·LLM·로봇 모두 mock으로 끝까지 동작합니다(ADR-0004).</p>
+`},
+
+/* 1 — Engage */
+{html:`
+  <span class="tag engage">ENGAGE · 도입 (15분)</span>
+  <h2>"블록들을 색깔별로 정리해" — 이 한 마디면 충분할까?</h2>
+  <div class="cols">
+    <div class="col">
+      <div class="card"><b>사람의 명령</b><p class="big" style="margin-top:6px">"블록들을 색깔별로 정리해"</p></div>
+      <p>👉 사람에겐 한 문장. 하지만 로봇에게는?</p>
+    </div>
+    <div class="col">
+      <div class="card"><b>로봇이 실제로 해야 할 일</b>
+        <ol><li>블록을 본다 (감지)</li><li>색깔로 나눈다 (분류)</li><li>각 칸으로 옮긴다 (픽앤플레이스)</li><li>원점 복귀</li></ol>
+      </div>
+    </div>
+  </div>
+  <div class="safe"><b>오늘의 질문:</b> 한 문장을 누가, 어떻게 ‘작은 단계’로 쪼갤까? → <b>LLM 오케스트레이터</b></div>
+`,
+notes:`
+  <h4>시연 (라이브 데모)</h4>
+  <ul><li>터미널에서 <code>solution.py</code> 를 실행해 음성→분해→게이트→실행이 한 번에 도는 모습을 보여준다.</li>
+  <li>출력의 "[2] LLM이 4단계로 분해했습니다" 줄을 가리키며 ‘분해’를 강조.</li></ul>
+  <h4>발문 유도 멘트</h4>
+  <p>"여러분이 로봇이라면 이 명령을 듣고 가장 먼저 뭘 해야 할까요?" → 학생들이 ‘본다/나눈다/옮긴다’를 스스로 말하게 유도.</p>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. 그냥 if문으로 짜면 안 되나요? → 됩니다. 하지만 명령 종류가 늘면? 자연어를 그대로 받아 분해하는 구조가 확장에 강합니다.</p>
+`},
+
+/* 2 — Explore */
+{html:`
+  <span class="tag explore">EXPLORE · 탐구 (20분)</span>
+  <h2>종이에 먼저 — 명령을 단계로 쪼개보기 (Logic-First)</h2>
+  <p>코드를 치기 전에, <b>무엇을 어떤 순서로</b> 할지부터 적습니다.</p>
+  <div class="card">
+    <h3>활동: 명령 → 단계 카드 배열</h3>
+    <div>
+      <span class="pill">detect (감지)</span>
+      <span class="pill">sort (분류)</span>
+      <span class="pill">pick_place (옮기기)</span>
+      <span class="pill">home (복귀)</span>
+    </div>
+    <p style="margin-top:10px">각 단계에 <code>{action, target, desc}</code> 를 붙여본다. 예: <code>{"action":"detect","target":"all","desc":"블록 감지"}</code></p>
+  </div>
+  <div class="safe"><b>Logic-First:</b> 순서가 틀리면 코드도 틀린다. detect 없이 sort? sort 없이 pick_place? 무엇이 깨질까?</div>
+`,
+notes:`
+  <h4>강사 대본</h4>
+  <p>"코드는 잠깐 덮어두세요. 포스트잇 4장에 단계를 쓰고 순서대로 책상에 놓아봅니다. 짝과 순서가 같은지 비교하세요."</p>
+  <h4>발문 유도</h4>
+  <ul><li>"detect를 빼면 무슨 일이 생길까?" (→ 옮길 블록 정보가 없음)</li>
+  <li>"sort 없이 바로 pick_place 하면?" (→ 코드가 방어적으로 자동 sort 하지만, 논리상 분류가 먼저임을 설명)</li></ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. target이 왜 필요해요? → "all"이면 전체, "red"면 빨강만. 같은 단계를 대상만 바꿔 재사용합니다.</p>
+`},
+
+/* 3 — Explain: 파이프라인 구조 */
+{html:`
+  <span class="tag explain">EXPLAIN · 설명 (25분) — 1/3</span>
+  <h2>전체 파이프라인: 듣기 → 분해 → 검토 → 실행</h2>
+  <div class="flow">
+    <span class="node">listen_command<br><small>STT</small></span><span class="arr">→</span>
+    <span class="node">decompose_command<br><small>LLM 분해</small></span><span class="arr">→</span>
+    <span class="node gate">review_plan<br><small>안전 게이트</small></span><span class="arr">→</span>
+    <span class="node">execute_plan<br><small>순차 실행</small></span>
+  </div>
+  <table>
+    <tr><th>단계</th><th>함수</th><th>입력 → 출력</th></tr>
+    <tr><td>1 듣기</td><td>listen_command</td><td>음성 파일 → 텍스트 명령</td></tr>
+    <tr><td>2 분해</td><td>decompose_command</td><td>명령 → 단계 목록(JSON)</td></tr>
+    <tr><td>3 검토</td><td>review_plan</td><td>계획 → 승인 여부(bool)</td></tr>
+    <tr><td>4 실행</td><td>execute_plan</td><td>계획 → detect→sort→pick_place→home</td></tr>
+  </table>
+`,
+notes:`
+  <h4>강사 대본</h4>
+  <p>"네 개의 함수가 릴레이 경주처럼 바통을 넘깁니다. 앞 단계의 출력이 다음 단계의 입력이에요. 이게 ‘파이프라인’입니다."</p>
+  <h4>짚을 포인트</h4>
+  <ul><li><code>execute_plan</code> 안에서 detect의 결과 <code>blocks</code> → sort의 입력, sort의 <code>grouped</code> → pick_place의 입력으로 흐른다.</li>
+  <li>3번 검토에서 거부되면 <b>이후 단계는 실행되지 않는다</b>.</li></ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. 함수를 왜 이렇게 나눠요? → 각자 한 가지 일만 하면 테스트·재사용·디버깅이 쉽습니다(단일 책임).</p>
+`},
+
+/* 4 — Explain: LLM 분해 + JSON */
+{html:`
+  <span class="tag explain">EXPLAIN · 설명 (25분) — 2/3</span>
+  <h2>오케스트레이터: 자연어 → JSON 계획</h2>
+  <pre><span class="c"># LLM에게 "JSON 배열만 출력하라"고 지시</span>
+<span class="k">raw</span> = llm.complete(messages=[...], system=ORCHESTRATOR_SYSTEM)
+<span class="c"># 응답에서 [ ... ] 부분만 잘라 파싱</span>
+start = raw.index(<span class="s">"["</span>); end = raw.rindex(<span class="s">"]"</span>) + 1
+plan = json.loads(raw[start:end])
+<span class="c"># list[dict]이고 비어있지 않으면 채택, 아니면 폴백</span>
+return plan <span class="k">if</span> 유효 <span class="k">else</span> _fallback_plan(command)</pre>
+  <div class="safe"><b>결정적 폴백:</b> mock이거나 JSON 파싱 실패 시 <code>_fallback_plan</code>(감지→분류→픽앤플레이스→복귀)으로 항상 안전하게 동작.</div>
+`,
+notes:`
+  <h4>강사 대본</h4>
+  <p>"사람 말은 흐물흐물해요. 기계는 딱 정해진 구조가 필요하죠. 그 ‘약속된 형식’이 <code>{action,target,desc}</code> JSON입니다."</p>
+  <h4>짚을 포인트</h4>
+  <ul><li><code>try/except (ValueError, json.JSONDecodeError)</code> 로 감싸 파싱 실패해도 죽지 않고 폴백으로 간다.</li>
+  <li>mock LLM은 비-JSON을 줄 수 있어, 폴백 덕분에 수업이 항상 끝까지 돈다.</li></ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. LLM이 매번 다르면 위험하지 않나요? → 그래서 다음 슬라이드의 ‘안전 게이트’가 있습니다.</p>
+  <p class="qa">Q. index/rindex가 뭐죠? → 첫 '['와 마지막 ']' 위치를 찾아 그 사이만 잘라냅니다.</p>
+`},
+
+/* 5 — Explain: 안전 게이트 */
+{html:`
+  <span class="tag explain">EXPLAIN · 설명 (25분) — 3/3</span>
+  <h2>안전 게이트 — 사람이 승인해야만 실행 (SFR-002)</h2>
+  <pre><span class="k">def</span> review_plan(plan, approver=None):
+    <span class="c"># 계획을 번호 매겨 사람에게 보여줌</span>
+    <span class="k">for</span> i, step <span class="k">in</span> enumerate(plan, 1):
+        print(f<span class="s">"{i}. ({step['action']}) {step['desc']}"</span>)
+    <span class="k">if</span> approver <span class="k">is</span> None:
+        <span class="k">return</span> True   <span class="c"># mock/무인: 자동 승인</span>
+    <span class="k">return</span> bool(approver(plan))  <span class="c"># 실제: 사람이 y/n</span></pre>
+  <div class="safe"><b>3중 안전:</b> ① 사람 승인 게이트 → ② 이동 직전 <code>check_move</code> 검사 → ③ 컨트롤러가 작업영역으로 다시 클램프.</div>
+`,
+notes:`
+  <h4>강사 대본</h4>
+  <p>"공장에서 로봇이 사람이 안 본 계획을 바로 실행하면? 사고죠. 그래서 산업 현장은 ‘사람 승인’을 반드시 끼워 넣습니다."</p>
+  <h4>시연</h4>
+  <ul><li><code>approver</code> 에 input 기반 함수를 넣어 ‘n’으로 거부 → "아무 동작도 실행하지 않습니다" 출력 확인.</li></ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. check_move가 막아주면 게이트는 왜 또 필요? → 게이트는 ‘계획 전체’를, check_move는 ‘개별 좌표’를 막습니다. 계층이 다릅니다.</p>
+`},
+
+/* 6 — Elaborate: TODO */
+{html:`
+  <span class="tag elaborate">ELABORATE · 적용 (35분)</span>
+  <h2>실습: scaffold.py 의 # TODO 5곳 채우기</h2>
+  <table>
+    <tr><th>#</th><th>함수</th><th>할 일</th></tr>
+    <tr><td>1</td><td>listen_command</td><td><code>stt.transcribe(audio_path)</code> 반환</td></tr>
+    <tr><td>2</td><td>decompose_command</td><td><code>llm.complete(...)</code> → JSON 추출·파싱, 실패 시 폴백</td></tr>
+    <tr><td>3</td><td>step_detect</td><td><code>frame=cam.read(); detect_colors(frame)</code></td></tr>
+    <tr><td>4</td><td>step_sort</td><td><code>grouped.setdefault(color,[]).append(b)</code></td></tr>
+    <tr><td>5</td><td>step_pick_place / step_home</td><td>8단계 픽앤플레이스 + 흡착 OFF 후 home</td></tr>
+  </table>
+  <div class="safe"><b>목표:</b> 모두 채우면 <code>solution.py</code> 와 동일 — 블록 3개 이동 성공!</div>
+`,
+notes:`
+  <h4>하드웨어/실습 운영</h4>
+  <ul><li>막히면 코드 속 ‘힌트’ 주석을 먼저 읽게 한다. 즉답 대신 순서를 되묻는다.</li>
+  <li>pick_place 8단계: 접근(SAFE_Z)→하강(PICK_Z)→suck(True)→상승→칸 위 이동→하강→suck(False)→상승.</li>
+  <li><b>흡착을 켰으면 반드시 끄게</b> 한다(다음 학생·안전).</li></ul>
+  <h4>흔한 실수</h4>
+  <p class="qa">· detect 빈 리스트 → cam.read() 누락 / · 블록 0개 이동 → sort 루프 누락 / · 흡착 안 떨어짐 → suck(False) 빠짐.</p>
+  <h4>발문</h4>
+  <p>"왜 _safe_move를 쓰지 않고 직접 move_to 하면 위험할까요?" (→ 작업영역 검사 생략)</p>
+`},
+
+/* 7 — Elaborate: pick&place 사이클 */
+{html:`
+  <span class="tag elaborate">ELABORATE · 적용 (35분) — 픽앤플레이스 사이클</span>
+  <h2>한 블록을 옮기는 8단계 (안전 높이 → 흡착)</h2>
+  <div class="flow">
+    <span class="node">① 접근 SAFE_Z</span><span class="arr">→</span>
+    <span class="node">② 하강 PICK_Z</span><span class="arr">→</span>
+    <span class="node gate">③ suck(True)</span><span class="arr">→</span>
+    <span class="node">④ 상승</span>
+  </div>
+  <div class="flow">
+    <span class="node">⑤ 칸 위 이동</span><span class="arr">→</span>
+    <span class="node">⑥ 하강</span><span class="arr">→</span>
+    <span class="node gate">⑦ suck(False)</span><span class="arr">→</span>
+    <span class="node">⑧ 상승</span>
+  </div>
+  <div class="safe"><b>충돌 방지:</b> 수평 이동은 항상 <code>SAFE_Z(80mm)</code>에서. 픽셀 중심은 <code>pixel_to_robot()</code>로 로봇 좌표 변환.</div>
+`,
+notes:`
+  <h4>강사 대본</h4>
+  <p>손으로 8단계를 흉내 내며 보여준다. "올라가서, 옆으로, 내려가서 — 절대 낮게 가로질러 가지 않습니다. 충돌 나요."</p>
+  <h4>하드웨어 트러블슈팅</h4>
+  <ul><li>블록을 못 집음 → DROP_ZONES/카메라 보정 확인, 조명 일정 유지.</li>
+  <li>⚠ 안전경고 출력 → 좌표가 WORKSPACE(x:180~320,y:-150~150,z:-60~150) 밖. 클램프되어 실행은 됨.</li></ul>
+  <h4>예상 Q&A</h4>
+  <p class="qa">Q. 픽셀이 어떻게 mm가 되죠? → 화면 가로→로봇 Y, 세로→로봇 X로 선형 보간(교육용 근사).</p>
+`},
+
+/* 8 — Evaluate */
+{html:`
+  <span class="tag evaluate">EVALUATE · 평가 (15분)</span>
+  <h2>확인 · 루브릭 · 회고</h2>
+  <div class="cols">
+    <div class="col">
+      <h3>실행 확인</h3>
+      <ul><li>음성 인식 결과 출력</li><li>"4단계로 분해" 확인</li><li>안전 게이트 통과</li><li>블록 3개 이동 성공</li></ul>
+    </div>
+    <div class="col">
+      <h3>루브릭(25점)</h3>
+      <ul><li>논리 설계(Logic-First)</li><li>명령 분해 이해</li><li>구현 완성도(TODO)</li><li>안전 의식</li><li>협업/회고</li></ul>
+    </div>
+  </div>
+  <div class="safe"><b>토론:</b> 안전 게이트를 끄면(자동 승인만 쓰면) 왜 위험할까? 실제 공장이라면?</div>
+`,
+notes:`
+  <h4>강사 대본</h4>
+  <p>"각자 결과를 짝과 비교하세요. 좌표·이동 개수가 같나요? 다르면 어느 TODO 때문일까요?"</p>
+  <h4>평가 운영</h4>
+  <ul><li>루브릭은 항목별 5/3/1점, 총 25점. 자기평가 → 동료평가 → 강사 코멘트 순.</li>
+  <li>회고: ‘오늘 배운 한 가지 + 막혔던 한 가지 + 안전이 왜 중요한지’ 한 줄씩.</li></ul>
+  <h4>예상 Q&A / 마무리</h4>
+  <p class="qa">Q. 실제 산업에서도 이래요? → 자연어→계획→순차 실행은 물류·제조 자동화의 표준 패턴입니다.</p>
+`},
+
+/* 9 — 마무리 요약 */
+{html:`
+  <span class="tag">정리 · SUMMARY</span>
+  <h2>오늘 핵심 3가지</h2>
+  <div class="card big">1. <b>오케스트레이션</b> — 한 마디 명령을 작은 단계(JSON 계획)로 분해한다.</div>
+  <div class="card big">2. <b>파이프라인</b> — 듣기→분해→검토→실행, 앞 출력이 뒤 입력이 된다.</div>
+  <div class="card big">3. <b>안전 게이트</b> — 사람 승인 + check_move + 클램프의 3중 안전.</div>
+  <p class="sub" style="margin-top:24px">코드: <code>a1_voice_orchestration/solution.py</code> · 실습: <code>scaffold.py</code> · 매뉴얼: <code>강사매뉴얼.docx</code></p>
+`,
+notes:`
+  <h4>마무리 멘트</h4>
+  <p>"여러분은 오늘 로봇에게 ‘무엇을’이 아니라 ‘말’로 시키고, 그 말을 단계로 쪼개 안전하게 실행하는 법을 배웠습니다. 이게 미래 공장의 작동 방식이에요."</p>
+  <h4>다음 차시 예고 / 확장</h4>
+  <ul><li>명령 종류 추가(예: "빨강만 옮겨") → target 활용.</li>
+  <li>approver를 input 기반으로 바꿔 실제 안전 게이트 체험.</li></ul>
+  <h4>정리 체크</h4>
+  <p class="qa">로봇 흡착 OFF · 원점 복귀 · 연결 해제 · 책상 정리 확인.</p>
+`}
+];
+
+/* ===== 렌더링 & 네비게이션 ===== */
+const stage=document.getElementById('stage');
+const notesEl=document.getElementById('notes');
+let idx=0;
+SLIDES.forEach((s,i)=>{
+  const d=document.createElement('div');
+  d.className='slide'+(i===0?' active':'');
+  d.innerHTML=s.html+'<div class="hint">N: 발표자 노트</div>';
+  stage.appendChild(d);
+});
+const slideEls=[...document.querySelectorAll('.slide')];
+document.getElementById('pagetot').textContent=SLIDES.length;
+
+function render(){
+  slideEls.forEach((el,i)=>el.classList.toggle('active',i===idx));
+  document.getElementById('pageno').textContent=idx+1;
+  document.getElementById('bar').style.width=((idx+1)/SLIDES.length*100)+'%';
+  notesEl.innerHTML=SLIDES[idx].notes||'<p>(노트 없음)</p>';
+}
+function go(n){ idx=Math.max(0,Math.min(SLIDES.length-1,n)); render(); }
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){go(idx+1);e.preventDefault();}
+  else if(e.key==='ArrowLeft'||e.key==='PageUp'){go(idx-1);e.preventDefault();}
+  else if(e.key==='Home'){go(0);}
+  else if(e.key==='End'){go(SLIDES.length-1);}
+  else if(e.key==='n'||e.key==='N'){notesEl.classList.toggle('show');}
+});
+/* 클릭/터치 네비: 화면 좌우 절반 */
+document.addEventListener('click',e=>{
+  if(e.target.closest('#notes')) return;
+  if(e.clientX < window.innerWidth*0.4) go(idx-1);
+  else if(e.clientX > window.innerWidth*0.6) go(idx+1);
+});
+render();
+</script>
+</body>
+</html>
